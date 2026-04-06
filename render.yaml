@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: halooglasi-notifier
+    runtime: docker
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: CHECK_INTERVAL
+        value: "3600"
