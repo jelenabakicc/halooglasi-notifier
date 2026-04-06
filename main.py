@@ -183,13 +183,14 @@ def check_new_listings() -> None:
     ]
 
     if first_run:
+        kept = [l for l in listings if not should_exclude(l)]
         log.info(
-            "First run – saving %d existing listings without notifying.", len(listings)
+            "First run – saving %d existing listings without notifying.", len(kept)
         )
         save_seen_ids({l["id"] for l in listings})
         send_telegram(
             f"✅ Halo Oglasi monitor pokrenut!\n"
-            f"Pratim {len(listings)} postojećih oglasa.\n"
+            f"Pratim {len(kept)} oglasa (isključeno {len(listings) - len(kept)} na Ledinama).\n"
             f"Dobićeš obaveštenje čim se pojavi novi stan."
         )
         return
