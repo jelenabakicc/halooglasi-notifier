@@ -68,8 +68,13 @@ def fetch_listings() -> list[dict]:
         resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        items = soup.select("div.product-item.product-list-item")
 
+        # Only look in the visible list container (not the hidden map one)
+        list_container = soup.select_one("#ad-list-2")
+        if not list_container:
+            break
+
+        items = list_container.select("div.product-item.product-list-item")
         if not items:
             break
 
@@ -78,10 +83,6 @@ def fetch_listings() -> list[dict]:
             if listing:
                 all_listings.append(listing)
 
-        # Check for next page
-        next_link = soup.select_one("a.next-page, li.next a")
-        if not next_link:
-            break
         page += 1
 
     log.info("Found %d listings total across %d page(s).", len(all_listings), page)
