@@ -31,14 +31,27 @@ SEARCH_URL = (
     "&page={page}"
 )
 
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0",
+]
+
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "sr-RS,sr;q=0.9,en;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "sr-RS,sr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
 }
+
+MAX_RETRIES = 3
 
 EXCLUDE_LOCATIONS = ["ledine"]
 
@@ -57,9 +70,37 @@ def save_seen_ids(seen: set) -> None:
 
 
 # ── Scraper ───────────────────────────────────────────────────────────
+def create_session():
+    """Create a cloudscraper session that looks like a real browser."""
+    scraper = cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "mobile": False},
+    )
+    ua = random.choice(USER_AGENTS)
+    scraper.headers.update({**HEADERS, "User-Agent": ua})
+
+    # Visit homepage first to establish cookies
+    log.info("Establishing session via homepage …")
+    scraper.get("https://www.halooglasi.com/", timeout=30)
+    time.sleep(random.uniform(2, 4))
+    return scraper
+
+
+def fetch_page(scraper, url: str) -> requests.Response:
+    """Fetch a page with retry logic for 403 errors."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        resp = scraper.get(url, timeout=30)
+        if resp.status_code != 403:
+            resp.raise_for_status()
+            return resp
+        wait = attempt * 10 + random.uniform(0, 5)
+        log.warning("Got 403 on attempt %d, retrying in %.0fs …", attempt, wait)
+        time.sleep(wait)
+    resp.raise_for_status()  # raise on final failure
+
+
 def fetch_listings() -> list[dict]:
     """Fetch all listings from all pages matching the search filters."""
-    scraper = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux"})
+    scraper = create_session()
     all_listings = []
     page = 1
 
@@ -67,9 +108,7 @@ def fetch_listings() -> list[dict]:
         url = SEARCH_URL.format(page=page)
         log.info("Fetching page %d …", page)
 
-        resp = scraper.get(url, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-
+        resp = fetch_page(scraper, url)
         soup = BeautifulSoup(resp.text, "html.parser")
 
         # Only look in the visible list container (not the hidden map one)
@@ -87,7 +126,7 @@ def fetch_listings() -> list[dict]:
                 all_listings.append(listing)
 
         page += 1
-        time.sleep(random.uniform(1, 3))  # pause between pages
+        time.sleep(random.uniform(2, 5))  # pause between pages
 
     log.info("Found %d listings total across %d page(s).", len(all_listings), page)
     return all_listings
