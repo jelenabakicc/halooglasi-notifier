@@ -3,8 +3,8 @@ import json
 import time
 import random
 import logging
-import cloudscraper
 import requests
+from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 from pathlib import Path
 
@@ -70,37 +70,32 @@ def save_seen_ids(seen: set) -> None:
 
 
 # ── Scraper ───────────────────────────────────────────────────────────
-def create_session():
-    """Create a cloudscraper session that looks like a real browser."""
-    scraper = cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "mobile": False},
-    )
-    ua = random.choice(USER_AGENTS)
-    scraper.headers.update({**HEADERS, "User-Agent": ua})
-
-    # Visit homepage first to establish cookies
+def create_session() -> cffi_requests.Session:
+    """Create a curl_cffi session with real browser TLS fingerprint."""
+    session = cffi_requests.Session(impersonate="chrome120")
+    # Visit homepage first to get cookies
     log.info("Establishing session via homepage …")
-    scraper.get("https://www.halooglasi.com/", timeout=30)
+    session.get("https://www.halooglasi.com/", timeout=30)
     time.sleep(random.uniform(2, 4))
-    return scraper
+    return session
 
 
-def fetch_page(scraper, url: str) -> requests.Response:
+def fetch_page(session, url: str) -> str:
     """Fetch a page with retry logic for 403 errors."""
     for attempt in range(1, MAX_RETRIES + 1):
-        resp = scraper.get(url, timeout=30)
+        resp = session.get(url, timeout=30)
         if resp.status_code != 403:
             resp.raise_for_status()
-            return resp
-        wait = attempt * 10 + random.uniform(0, 5)
+            return resp.text
+        wait = attempt * 15 + random.uniform(5, 10)
         log.warning("Got 403 on attempt %d, retrying in %.0fs …", attempt, wait)
         time.sleep(wait)
-    resp.raise_for_status()  # raise on final failure
+    resp.raise_for_status()
 
 
 def fetch_listings() -> list[dict]:
     """Fetch all listings from all pages matching the search filters."""
-    scraper = create_session()
+    session = create_session()
     all_listings = []
     page = 1
 
@@ -108,8 +103,8 @@ def fetch_listings() -> list[dict]:
         url = SEARCH_URL.format(page=page)
         log.info("Fetching page %d …", page)
 
-        resp = fetch_page(scraper, url)
-        soup = BeautifulSoup(resp.text, "html.parser")
+        html = fetch_page(session, url)
+        soup = BeautifulSoup(html, "html.parser")
 
         # Only look in the visible list container (not the hidden map one)
         list_container = soup.select_one("#ad-list-2")
