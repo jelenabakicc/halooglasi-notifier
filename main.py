@@ -252,16 +252,21 @@ def check_new_listings() -> None:
 
 
 def main() -> None:
-    log.info("Starting Halo Oglasi monitor …")
-    log.info("Check interval: %d seconds", CHECK_INTERVAL)
+    run_once = os.environ.get("RUN_ONCE", "0") == "1"
 
-    while True:
-        try:
-            check_new_listings()
-        except Exception:
-            log.exception("Error during check")
-        log.info("Sleeping %d seconds …", CHECK_INTERVAL)
-        time.sleep(CHECK_INTERVAL)
+    if run_once:
+        log.info("Running single check …")
+        check_new_listings()
+    else:
+        log.info("Starting Halo Oglasi monitor …")
+        log.info("Check interval: %d seconds", CHECK_INTERVAL)
+        while True:
+            try:
+                check_new_listings()
+            except Exception:
+                log.exception("Error during check")
+            log.info("Sleeping %d seconds …", CHECK_INTERVAL)
+            time.sleep(CHECK_INTERVAL)
 
 
 if __name__ == "__main__":
