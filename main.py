@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 # ── Config ────────────────────────────────────────────────────────────
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", 900))  # seconds
+CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", 1800))  # seconds
 
 SEARCH_URL = (
     "https://www.halooglasi.com/nekretnine/izdavanje-stanova/beograd-novi-beograd"
