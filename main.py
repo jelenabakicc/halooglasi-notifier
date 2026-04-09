@@ -1,7 +1,9 @@
 import os
 import json
 import time
+import random
 import logging
+import cloudscraper
 import requests
 from bs4 import BeautifulSoup
 from pathlib import Path
@@ -57,6 +59,7 @@ def save_seen_ids(seen: set) -> None:
 # ── Scraper ───────────────────────────────────────────────────────────
 def fetch_listings() -> list[dict]:
     """Fetch all listings from all pages matching the search filters."""
+    scraper = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "linux"})
     all_listings = []
     page = 1
 
@@ -64,7 +67,7 @@ def fetch_listings() -> list[dict]:
         url = SEARCH_URL.format(page=page)
         log.info("Fetching page %d …", page)
 
-        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp = scraper.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -84,6 +87,7 @@ def fetch_listings() -> list[dict]:
                 all_listings.append(listing)
 
         page += 1
+        time.sleep(random.uniform(1, 3))  # pause between pages
 
     log.info("Found %d listings total across %d page(s).", len(all_listings), page)
     return all_listings
