@@ -31,6 +31,11 @@ SEARCH_URL = (
     "&page={page}"
 )
 
+SEARCH_URL_4ZIDA = (
+    "https://www.4zida.rs/izdavanje-stanova/novi-beograd-beograd/do-750-evra"
+    "?sortiranje=najnoviji&lift=da&vece_od=45m2&terasa=da&strana={page}"
+)
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -101,7 +106,7 @@ def fetch_listings() -> list[dict]:
 
     while True:
         url = SEARCH_URL.format(page=page)
-        log.info("Fetching page %d …", page)
+        log.info("Fetching Halo Oglasi page %d …", page)
 
         html = fetch_page(session, url)
         soup = BeautifulSoup(html, "html.parser")
@@ -123,12 +128,41 @@ def fetch_listings() -> list[dict]:
         page += 1
         time.sleep(random.uniform(2, 5))  # pause between pages
 
-    log.info("Found %d listings total across %d page(s).", len(all_listings), page)
+    log.info("Halo Oglasi: found %d listings across %d page(s).", len(all_listings), page)
+    return all_listings
+
+
+def fetch_listings_4zida() -> list[dict]:
+    """Fetch all listings from 4zida.rs."""
+    all_listings = []
+    page = 1
+    session = cffi_requests.Session(impersonate="chrome120")
+
+    while True:
+        url = SEARCH_URL_4ZIDA.format(page=page)
+        log.info("Fetching 4zida page %d …", page)
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        cards = soup.select('div[test-data="ad-search-card"]')
+        if not cards:
+            break
+
+        for card in cards:
+            listing = parse_4zida_listing(card)
+            if listing:
+                all_listings.append(listing)
+
+        page += 1
+        time.sleep(random.uniform(1, 3))
+
+    log.info("4zida: found %d listings across %d page(s).", len(all_listings), page)
     return all_listings
 
 
 def parse_listing(item) -> dict | None:
-    """Extract structured data from a single listing HTML element."""
+    """Extract structured data from a single Halo Oglasi listing."""
     listing_id = item.get("data-id", "")
 
     # Title & URL
@@ -155,7 +189,6 @@ def parse_listing(item) -> dict | None:
     features = item.select("ul.product-features li .value-wrapper")
     if features:
         raw = features[0].get_text(strip=True)
-        # Clean up "53 m2Kvadratura" → "53 m²"
         sqm = raw.replace("Kvadratura", "").replace("m2", "m²").strip()
 
     # Publish date
@@ -163,13 +196,61 @@ def parse_listing(item) -> dict | None:
     publish_date = date_el.get_text(strip=True) if date_el else "N/A"
 
     return {
-        "id": listing_id,
+        "id": f"halo:{listing_id}",
+        "source": "Halo Oglasi",
         "title": title,
         "url": url,
         "location": location,
         "price": price,
         "sqm": sqm,
         "date": publish_date,
+    }
+
+
+def parse_4zida_listing(card) -> dict | None:
+    """Extract structured data from a single 4zida listing card."""
+    import re
+
+    # Find listing URL & ID (24-char hex at end of path)
+    link = card.find("a", href=re.compile(r"/izdavanje-stanova/.*/[a-f0-9]{24}$"))
+    if not link:
+        return None
+    href = link["href"]
+    m = re.search(r"/([a-f0-9]{24})$", href)
+    if not m:
+        return None
+    listing_id = m.group(1)
+    url = "https://www.4zida.rs" + href
+
+    # Title (first p with "truncate font-medium" classes)
+    title_el = card.select_one("p.truncate.font-medium")
+    title = title_el.get_text(strip=True) if title_el else "—"
+
+    # Location
+    loc_el = card.select_one("p.line-clamp-2")
+    location = loc_el.get_text(strip=True) if loc_el else "—"
+
+    # Price
+    price_el = card.select_one("p.bg-spotlight.font-bold")
+    price = price_el.get_text(strip=True) if price_el else "N/A"
+
+    # Features (rooms, furnished, heating) — all text from the features link
+    features = ""
+    for a in card.find_all("a", href=True):
+        txt = a.get_text(strip=True)
+        if "sobe" in txt or "soba" in txt or "namešten" in txt.lower():
+            features = txt
+            break
+
+    return {
+        "id": f"4zida:{listing_id}",
+        "source": "4zida",
+        "title": title,
+        "url": url,
+        "location": location,
+        "price": price,
+        "sqm": features or "—",
+        "date": "—",
     }
 
 
@@ -199,23 +280,38 @@ def send_telegram(text: str) -> None:
 
 
 def format_message(listing: dict) -> str:
-    return (
-        f"🏠 <b>Novi stan na Halo Oglasima!</b>\n\n"
-        f"<b>{listing['title']}</b>\n"
-        f"📍 {listing['location']}\n"
-        f"💰 {listing['price']}\n"
-        f"📐 {listing['sqm']}\n"
-        f"📅 {listing['date']}\n\n"
-        f"🔗 <a href=\"{listing['url']}\">Pogledaj oglas</a>"
-    )
+    lines = [
+        f"🏠 <b>Novi stan na {listing.get('source', 'Halo Oglasima')}!</b>",
+        "",
+        f"<b>{listing['title']}</b>",
+        f"📍 {listing['location']}",
+        f"💰 {listing['price']}",
+        f"📐 {listing['sqm']}",
+    ]
+    if listing.get("date") and listing["date"] != "—":
+        lines.append(f"📅 {listing['date']}")
+    lines.append("")
+    lines.append(f"🔗 <a href=\"{listing['url']}\">Pogledaj oglas</a>")
+    return "\n".join(lines)
 
 
 # ── Main loop ─────────────────────────────────────────────────────────
+def fetch_all_listings() -> list[dict]:
+    """Fetch listings from all configured sources."""
+    all_listings = []
+    for fetcher in (fetch_listings, fetch_listings_4zida):
+        try:
+            all_listings.extend(fetcher())
+        except Exception:
+            log.exception("Error fetching from %s", fetcher.__name__)
+    return all_listings
+
+
 def check_new_listings() -> None:
     seen = load_seen_ids()
     first_run = len(seen) == 0
 
-    listings = fetch_listings()
+    listings = fetch_all_listings()
     new_listings = [
         l for l in listings if l["id"] not in seen and not should_exclude(l)
     ]
@@ -227,8 +323,9 @@ def check_new_listings() -> None:
         )
         save_seen_ids({l["id"] for l in listings})
         send_telegram(
-            f"✅ Halo Oglasi monitor pokrenut!\n"
-            f"Pratim {len(kept)} oglasa (isključeno {len(listings) - len(kept)} na Ledinama).\n"
+            f"✅ Monitor stanova pokrenut!\n"
+            f"Pratim {len(kept)} oglasa (Halo Oglasi + 4zida), "
+            f"isključeno {len(listings) - len(kept)} na Ledinama.\n"
             f"Dobićeš obaveštenje čim se pojavi novi stan."
         )
         return
@@ -237,11 +334,10 @@ def check_new_listings() -> None:
         log.info("Found %d new listing(s)!", len(new_listings))
         for listing in new_listings:
             send_telegram(format_message(listing))
-            time.sleep(1)  # don't spam Telegram API
+            time.sleep(1)
     else:
         log.info("No new listings.")
 
-    # Update seen set with all current listing IDs
     seen.update(l["id"] for l in listings)
     save_seen_ids(seen)
 
