@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import random
@@ -20,20 +21,20 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", 1800))  # seconds
 
 SEARCH_URL = (
-    "https://www.halooglasi.com/nekretnine/izdavanje-stanova/beograd-novi-beograd"
-    "?cena_d_to=750"
+    "https://www.halooglasi.com/nekretnine/izdavanje-stanova/beograd"
+    "?cena_d_to=550"
     "&cena_d_unit=4"
-    "&kvadratura_d_from=45"
+    "&kvadratura_d_from=40"
     "&kvadratura_d_unit=1"
-    "&namestenost_id_l=562"
-    "&dodatno_id_ls=12000001"
-    "&ostalo_id_ls=12100001%2C12100002"
+    "&namestenost_id_l=562"  # namešteno
+    "&dodatno_id_ls=12000001"  # odmah useljiv
+    "&ostalo_id_ls=12100001%2C12100002"  # terasa, klima
     "&page={page}"
 )
 
 SEARCH_URL_4ZIDA = (
-    "https://www.4zida.rs/izdavanje-stanova/novi-beograd-beograd/do-750-evra"
-    "?sortiranje=najnoviji&lift=da&vece_od=45m2&terasa=da&strana={page}"
+    "https://www.4zida.rs/izdavanje-stanova/beograd/do-550-evra"
+    "?sortiranje=najnoviji&vece_od=40m2&terasa=da&strana={page}"
 )
 
 USER_AGENTS = [
@@ -58,7 +59,9 @@ HEADERS = {
 
 MAX_RETRIES = 3
 
-EXCLUDE_LOCATIONS = ["ledine"]
+EXCLUDE_LOCATIONS = ["ledine", "obrenovac", "lazarevac", "mladenovac"]
+# Whole-word match so street names like "Lazarevački drum" are not excluded.
+EXCLUDE_RE = re.compile(r"\b(" + "|".join(EXCLUDE_LOCATIONS) + r")\b", re.IGNORECASE)
 
 SEEN_FILE = Path(os.environ.get("SEEN_FILE", "seen_ids.json"))
 
@@ -256,13 +259,9 @@ def parse_4zida_listing(card) -> dict | None:
 
 # ── Filter ────────────────────────────────────────────────────────────
 def should_exclude(listing: dict) -> bool:
-    """Return True if the listing should be excluded (e.g. Ledine)."""
-    loc_lower = listing["location"].lower()
-    title_lower = listing["title"].lower()
-    for excl in EXCLUDE_LOCATIONS:
-        if excl in loc_lower or excl in title_lower:
-            return True
-    return False
+    """Return True if the listing is in an excluded location (see EXCLUDE_LOCATIONS)."""
+    text = f"{listing['location']} {listing['title']}"
+    return EXCLUDE_RE.search(text) is not None
 
 
 # ── Telegram ──────────────────────────────────────────────────────────
@@ -325,7 +324,8 @@ def check_new_listings() -> None:
         send_telegram(
             f"✅ Monitor stanova pokrenut!\n"
             f"Pratim {len(kept)} oglasa (Halo Oglasi + 4zida), "
-            f"isključeno {len(listings) - len(kept)} na Ledinama.\n"
+            f"isključeno {len(listings) - len(kept)} "
+            f"({', '.join(e.capitalize() for e in EXCLUDE_LOCATIONS)}).\n"
             f"Dobićeš obaveštenje čim se pojavi novi stan."
         )
         return
