@@ -273,9 +273,17 @@ def send_telegram(text: str) -> None:
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
-    resp = requests.post(url, json=payload, timeout=15)
-    if not resp.ok:
-        log.error("Telegram error: %s", resp.text)
+    for _ in range(3):
+        resp = requests.post(url, json=payload, timeout=15)
+        if resp.status_code == 429:
+            retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
+            log.warning("Telegram rate limit hit, waiting %ss …", retry_after)
+            time.sleep(retry_after + 1)
+            continue
+        if not resp.ok:
+            log.error("Telegram error: %s", resp.text)
+        return
+    log.error("Telegram: giving up after repeated rate limiting")
 
 
 def format_message(listing: dict) -> str:
@@ -311,6 +319,8 @@ def check_new_listings() -> None:
     first_run = len(seen) == 0
 
     listings = fetch_all_listings()
+    # Pagination can shift mid-fetch and repeat a listing; keep each ID once.
+    listings = list({l["id"]: l for l in listings}.values())
     new_listings = [
         l for l in listings if l["id"] not in seen and not should_exclude(l)
     ]
